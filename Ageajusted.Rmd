@@ -1,0 +1,1911 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+```{r}
+library("epitools")
+library("dplyr")
+```
+
+
+```{r}
+age_groups <- c("15-19 years", "20-24 years", "25-29 years", "30-34 years", "35-39 years", "40-44 years", "45-49 years")
+rates <- c(15.35108987, 37.36613749, 97.45666269, 241.6664959, 465.0025842, 744.3700305, 1000.915825)
+std_pop <- c(84670.3653721198, 82171.2400659769, 79272.2547108512, 76073.3743189884, 71474.9837556855, 65876.9430699255, 60378.8673964113)
+cases <- rates * std_pop  # Calculate the number of cases from rates
+
+# Create a data frame
+data <- data.frame(
+  age_group = age_groups,
+  cases = cases,
+  population = std_pop
+)
+
+# Use the ageadjust.direct function to calculate the age-adjusted rate and confidence interval
+result <- ageadjust.direct(count = data$cases, pop = data$population, stdpop = data$population)
+
+# Print the result
+print(result)
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+age_groups <- c("20-24 years", "25-29 years", "30-34 years", "35-39 years", "40-44 years", "45-49 years")
+std_pop <- c(82171.2400659769, 79272.2547108512, 76073.3743189884, 71474.9837556855, 65876.9430699255, 60378.8673964113)
+
+rates <- c(0.037287379,
+0.087503919,
+0.15879755,
+0.257012353,
+0.592792406,
+1.176769093)
+cases <- rates * std_pop  # Calculate the number of cases from rates
+
+# Create a data frame
+data <- data.frame(
+  age_group = age_groups,
+  cases = cases,
+  population = std_pop
+)
+
+# Use the ageadjust.direct function to calculate the age-adjusted rate and confidence interval
+result <- ageadjust.direct(count = data$cases, pop = data$population, stdpop = data$population)
+
+# Print the result
+print(result)
+```
+
+
+```{r}
+install.packages("BAPC", repos = "http://R-Forge.R-project.org")
+library(BAPC)
+library(bamp)
+install.packages("INLA", repos = "https://inla.r-inla-download.org/R/stable", dependencies = TRUE)
+library(INLA)
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+library(Epi)
+breast_incident <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/1990_2021_breast_incident.csv")
+population <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/population3.csv")
+
+# Ensure that all relevant data is numeric
+breast_incident[, -1] <- lapply(breast_incident[, -1], as.numeric)
+population[, -1] <- lapply(population[, -1], as.numeric)
+
+# Function to remove 'X' prefix and convert to numeric
+clean_and_convert <- function(df) {
+  # Remove 'X' prefix from column names
+  names(df) <- gsub("^X", "", names(df))
+  
+  # Convert all columns except the first one to numeric
+  df[,-1] <- lapply(df[,-1], function(x) as.numeric(as.character(x)))
+  
+  return(df)
+}
+
+# Apply the function to both dataframes
+breast_incident <- clean_and_convert(breast_incident)
+population <- clean_and_convert(population)
+
+# Define standard weights for age-standardization
+wstand <- c(0.163, 0.158, 0.153, 0.146, 0.137, 0.127, 0.116)
+
+
+# Set the 'year' column as row names in 'sample'
+rownames(breast_incident) <- breast_incident$year
+breast_incident <- breast_incident[, -1]
+
+rownames(population) <- population$year
+population <- population[, -1]
+
+sample_pro <- matrix(data = NA, nrow = 9, ncol = 7) %>% as.data.frame()
+rownames(sample_pro) <- seq(2022, 2030, 1)
+colnames(sample_pro) <- c("15_19", "20_24", "25_29", "30_34", "35_39", "40_44", "45_49")
+
+# Combine the data frames using rbind
+breast_incident <- rbind(breast_incident, sample_pro)
+
+# Create APCList object
+lc_esoph_1 <- APCList(breast_incident, population, gf = 5)
+
+# Perform Bayesian Age-Period-Cohort analysis
+bapc_result1 <- BAPC(
+  lc_esoph_1,
+  predict = list(npredict = 10, retro = TRUE),
+  secondDiff = FALSE,
+  stdweight = wstand,
+  verbose = TRUE
+)
+
+plotBAPC(bapc_result1, 
+         scale = 10^5, 
+         type = 'ageStdRate', 
+         showdata = TRUE
+)
+
+```
+
+
+
+```{r}
+slotNames(bapc_result1)
+
+# 1) Extract Observed and Projected Means
+obs_all <- bapc_result1@stdobs
+fit_proj <- bapc_result1@agestd.proj[, "mean"]
+
+# 2) Align by Common Years
+common_years_proj <- intersect(names(obs_all), rownames(bapc_result1@agestd.proj))
+obs_proj <- obs_all[common_years_proj]
+fit_proj <- fit_proj[common_years_proj]
+
+# 3) Compute Error Metrics
+MSE_proj  <- mean((obs_proj - fit_proj)^2, na.rm = TRUE)
+RMSE_proj <- sqrt(MSE_proj)
+MAE_proj  <- mean(abs(obs_proj - fit_proj), na.rm = TRUE)
+
+# WARNING: If obs_proj includes zeros, MAPE can be Inf
+MAPE_proj <- mean(abs(obs_proj - fit_proj) / obs_proj, na.rm = TRUE) * 100
+
+# 4) Print Results
+cat("=== Projected Accuracy Metrics (Years in Overlap) ===\n")
+cat("MSE:   ", MSE_proj,  "\n")
+cat("RMSE:  ", RMSE_proj, "\n")
+cat("MAE:   ", MAE_proj,  "\n")
+cat("MAPE:  ", MAPE_proj, "%\n\n")
+
+```
+
+
+```{r}
+non_zero_idx <- which(obs_proj > 0)
+MAPE_proj_no_zeros <- mean(
+  abs(obs_proj[non_zero_idx] - fit_proj[non_zero_idx]) / obs_proj[non_zero_idx],
+  na.rm = TRUE
+) * 100
+cat("MAPE (excluding zero obs):", MAPE_proj_no_zeros, "%\n")
+```
+
+
+```{r}
+
+```
+
+
+
+```{r}
+library(Epi)
+cervical_incident <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/1990_2021_cervical_incident.csv")
+population <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/population3.csv")
+
+# Ensure that all relevant data is numeric
+cervical_incident[, -1] <- lapply(cervical_incident[, -1], as.numeric)
+population[, -1] <- lapply(population[, -1], as.numeric)
+
+# Function to remove 'X' prefix and convert to numeric
+clean_and_convert <- function(df) {
+  # Remove 'X' prefix from column names
+  names(df) <- gsub("^X", "", names(df))
+  
+  # Convert all columns except the first one to numeric
+  df[,-1] <- lapply(df[,-1], function(x) as.numeric(as.character(x)))
+  
+  return(df)
+}
+
+# Apply the function to both dataframes
+cervical_incident <- clean_and_convert(cervical_incident)
+population <- clean_and_convert(population)
+
+# Define standard weights for age-standardization
+wstand <- c(0.163, 0.158, 0.153, 0.146, 0.137, 0.127, 0.116)
+
+
+# Set the 'year' column as row names in 'sample'
+rownames(cervical_incident) <- cervical_incident$year
+cervical_incident <- cervical_incident[, -1]
+
+rownames(population) <- population$year
+population <- population[, -1]
+
+sample_pro <- matrix(data = NA, nrow = 9, ncol = 7) %>% as.data.frame()
+rownames(sample_pro) <- seq(2022, 2030, 1)
+colnames(sample_pro) <- c("15_19", "20_24", "25_29", "30_34", "35_39", "40_44", "45_49")
+
+# Combine the data frames using rbind
+cervical_incident <- rbind(cervical_incident, sample_pro)
+
+# Create APCList object
+lc_esoph_2 <- APCList(cervical_incident, population, gf = 5)
+
+# Perform Bayesian Age-Period-Cohort analysis
+bapc_result2 <- BAPC(
+  lc_esoph_2,
+  predict = list(npredict = 10, retro = TRUE),
+  secondDiff = FALSE,
+  stdweight = wstand,
+  verbose = TRUE
+)
+
+plotBAPC(bapc_result2, 
+         scale = 10^5, 
+         type = 'ageStdRate', 
+         showdata = TRUE
+)
+
+```
+
+
+
+```{r}
+slotNames(bapc_result2)
+
+# 1) Extract Observed and Projected Means
+obs_all <- bapc_result2@stdobs
+fit_proj <- bapc_result2@agestd.proj[, "mean"]
+
+# 2) Align by Common Years
+common_years_proj <- intersect(names(obs_all), rownames(bapc_result2@agestd.proj))
+obs_proj <- obs_all[common_years_proj]
+fit_proj <- fit_proj[common_years_proj]
+
+# 3) Compute Error Metrics
+MSE_proj  <- mean((obs_proj - fit_proj)^2, na.rm = TRUE)
+RMSE_proj <- sqrt(MSE_proj)
+MAE_proj  <- mean(abs(obs_proj - fit_proj), na.rm = TRUE)
+
+# WARNING: If obs_proj includes zeros, MAPE can be Inf
+MAPE_proj <- mean(abs(obs_proj - fit_proj) / obs_proj, na.rm = TRUE) * 100
+
+# 4) Print Results
+cat("=== Projected Accuracy Metrics (Years in Overlap) ===\n")
+cat("MSE:   ", MSE_proj,  "\n")
+cat("RMSE:  ", RMSE_proj, "\n")
+cat("MAE:   ", MAE_proj,  "\n")
+cat("MAPE:  ", MAPE_proj, "%\n\n")
+
+```
+
+
+```{r}
+non_zero_idx <- which(obs_proj > 0)
+MAPE_proj_no_zeros <- mean(
+  abs(obs_proj[non_zero_idx] - fit_proj[non_zero_idx]) / obs_proj[non_zero_idx],
+  na.rm = TRUE
+) * 100
+cat("MAPE (excluding zero obs):", MAPE_proj_no_zeros, "%\n")
+```
+
+
+
+```{r}
+ovarian_incident <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/1990_2021_ovarian_incident.csv")
+population <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/population3.csv")
+
+# Ensure that all relevant data is numeric
+ovarian_incident[, -1] <- lapply(ovarian_incident[, -1], as.numeric)
+population[, -1] <- lapply(population[, -1], as.numeric)
+
+# Function to remove 'X' prefix and convert to numeric
+clean_and_convert <- function(df) {
+  # Remove 'X' prefix from column names
+  names(df) <- gsub("^X", "", names(df))
+  
+  # Convert all columns except the first one to numeric
+  df[,-1] <- lapply(df[,-1], function(x) as.numeric(as.character(x)))
+  
+  return(df)
+}
+
+# Apply the function to both dataframes
+ovarian_incident <- clean_and_convert(ovarian_incident)
+population <- clean_and_convert(population)
+
+# Define standard weights for age-standardization
+wstand <- c(0.163, 0.158, 0.153, 0.146, 0.137, 0.127, 0.116)
+
+
+# Set the 'year' column as row names in 'sample'
+rownames(ovarian_incident) <- ovarian_incident$year
+ovarian_incident <- ovarian_incident[, -1]
+
+rownames(population) <- population$year
+population <- population[, -1]
+
+sample_pro <- matrix(data = NA, nrow = 9, ncol = 7) %>% as.data.frame()
+rownames(sample_pro) <- seq(2022, 2030, 1)
+colnames(sample_pro) <- c("15_19", "20_24", "25_29", "30_34", "35_39", "40_44", "45_49")
+
+# Combine the data frames using rbind
+ovarian_incident <- rbind(ovarian_incident, sample_pro)
+
+# Create APCList object
+lc_esoph_3 <- APCList(ovarian_incident, population, gf = 5)
+
+# Perform Bayesian Age-Period-Cohort analysis
+bapc_result3 <- BAPC(
+  lc_esoph_3,
+  predict = list(npredict = 10, retro = TRUE),
+  secondDiff = FALSE,
+  stdweight = wstand,
+  verbose = TRUE
+)
+
+plotBAPC(bapc_result3, 
+         scale = 10^5, 
+         type = 'ageStdRate', 
+         showdata = TRUE
+)
+
+```
+
+
+
+```{r}
+slotNames(bapc_result3)
+
+# 1) Extract Observed and Projected Means
+obs_all <- bapc_result3@stdobs
+fit_proj <- bapc_result3@agestd.proj[, "mean"]
+
+# 2) Align by Common Years
+common_years_proj <- intersect(names(obs_all), rownames(bapc_result3@agestd.proj))
+obs_proj <- obs_all[common_years_proj]
+fit_proj <- fit_proj[common_years_proj]
+
+# 3) Compute Error Metrics
+MSE_proj  <- mean((obs_proj - fit_proj)^2, na.rm = TRUE)
+RMSE_proj <- sqrt(MSE_proj)
+MAE_proj  <- mean(abs(obs_proj - fit_proj), na.rm = TRUE)
+
+# WARNING: If obs_proj includes zeros, MAPE can be Inf
+MAPE_proj <- mean(abs(obs_proj - fit_proj) / obs_proj, na.rm = TRUE) * 100
+
+# 4) Print Results
+cat("=== Projected Accuracy Metrics (Years in Overlap) ===\n")
+cat("MSE:   ", MSE_proj,  "\n")
+cat("RMSE:  ", RMSE_proj, "\n")
+cat("MAE:   ", MAE_proj,  "\n")
+cat("MAPE:  ", MAPE_proj, "%\n\n")
+
+```
+
+
+```{r}
+non_zero_idx <- which(obs_proj > 0)
+MAPE_proj_no_zeros <- mean(
+  abs(obs_proj[non_zero_idx] - fit_proj[non_zero_idx]) / obs_proj[non_zero_idx],
+  na.rm = TRUE
+) * 100
+cat("MAPE (excluding zero obs):", MAPE_proj_no_zeros, "%\n")
+```
+
+
+
+
+```{r}
+uterine_incident <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/1990_2021_uterine_incident.csv")
+population <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/population3.csv")
+
+# Ensure that all relevant data is numeric
+uterine_incident[, -1] <- lapply(uterine_incident[, -1], as.numeric)
+population[, -1] <- lapply(population[, -1], as.numeric)
+
+# Function to remove 'X' prefix and convert to numeric
+clean_and_convert <- function(df) {
+  # Remove 'X' prefix from column names
+  names(df) <- gsub("^X", "", names(df))
+  
+  # Convert all columns except the first one to numeric
+  df[,-1] <- lapply(df[,-1], function(x) as.numeric(as.character(x)))
+  
+  return(df)
+}
+
+# Apply the function to both dataframes
+uterine_incident <- clean_and_convert(uterine_incident)
+population <- clean_and_convert(population)
+
+# Define standard weights for age-standardization
+wstand <- c(0.163, 0.158, 0.153, 0.146, 0.137, 0.127, 0.116)
+
+
+# Set the 'year' column as row names in 'sample'
+rownames(uterine_incident) <- uterine_incident$year
+uterine_incident <- uterine_incident[, -1]
+
+rownames(population) <- population$year
+population <- population[, -1]
+
+sample_pro <- matrix(data = NA, nrow = 9, ncol = 7) %>% as.data.frame()
+rownames(sample_pro) <- seq(2022, 2030, 1)
+colnames(sample_pro) <- c("15_19", "20_24", "25_29", "30_34", "35_39", "40_44", "45_49")
+
+# Combine the data frames using rbind
+uterine_incident <- rbind(uterine_incident, sample_pro)
+
+# Create APCList object
+lc_esoph_4 <- APCList(uterine_incident, population, gf = 5)
+
+# Perform Bayesian Age-Period-Cohort analysis
+bapc_result4 <- BAPC(
+  lc_esoph_4,
+  predict = list(npredict = 10, retro = TRUE),
+  secondDiff = FALSE,
+  stdweight = wstand,
+  verbose = FALSE
+)
+
+plotBAPC(bapc_result4, 
+         scale = 10^5, 
+         type = 'ageStdRate', 
+         showdata = TRUE
+)
+```
+
+
+
+```{r}
+slotNames(bapc_result4)
+
+# 1) Extract Observed and Projected Means
+obs_all <- bapc_result4@stdobs
+fit_proj <- bapc_result4@agestd.proj[, "mean"]
+
+# 2) Align by Common Years
+common_years_proj <- intersect(names(obs_all), rownames(bapc_result4@agestd.proj))
+obs_proj <- obs_all[common_years_proj]
+fit_proj <- fit_proj[common_years_proj]
+
+# 3) Compute Error Metrics
+MSE_proj  <- mean((obs_proj - fit_proj)^2, na.rm = TRUE)
+RMSE_proj <- sqrt(MSE_proj)
+MAE_proj  <- mean(abs(obs_proj - fit_proj), na.rm = TRUE)
+
+# WARNING: If obs_proj includes zeros, MAPE can be Inf
+MAPE_proj <- mean(abs(obs_proj - fit_proj) / obs_proj, na.rm = TRUE) * 100
+
+# 4) Print Results
+cat("=== Projected Accuracy Metrics (Years in Overlap) ===\n")
+cat("MSE:   ", MSE_proj,  "\n")
+cat("RMSE:  ", RMSE_proj, "\n")
+cat("MAE:   ", MAE_proj,  "\n")
+cat("MAPE:  ", MAPE_proj, "%\n\n")
+
+```
+
+
+```{r}
+non_zero_idx <- which(obs_proj > 0)
+MAPE_proj_no_zeros <- mean(
+  abs(obs_proj[non_zero_idx] - fit_proj[non_zero_idx]) / obs_proj[non_zero_idx],
+  na.rm = TRUE
+) * 100
+cat("MAPE (excluding zero obs):", MAPE_proj_no_zeros, "%\n")
+```
+
+
+
+
+```{r}
+breast_DALYS <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/1990_2021_breast_DALYS.csv")
+population <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/population3.csv")
+
+# Ensure that all relevant data is numeric
+breast_DALYS[, -1] <- lapply(breast_DALYS[, -1], as.numeric)
+population[, -1] <- lapply(population[, -1], as.numeric)
+
+# Function to remove 'X' prefix and convert to numeric
+clean_and_convert <- function(df) {
+  # Remove 'X' prefix from column names
+  names(df) <- gsub("^X", "", names(df))
+  
+  # Convert all columns except the first one to numeric
+  df[,-1] <- lapply(df[,-1], function(x) as.numeric(as.character(x)))
+  
+  return(df)
+}
+
+# Apply the function to both dataframes
+breast_DALYS <- clean_and_convert(breast_DALYS)
+population <- clean_and_convert(population)
+
+# Define standard weights for age-standardization
+wstand <- c(0.163, 0.158, 0.153, 0.146, 0.137, 0.127, 0.116)
+
+
+# Set the 'year' column as row names in 'sample'
+rownames(breast_DALYS) <- breast_DALYS$year
+breast_DALYS <- breast_DALYS[, -1]
+
+rownames(population) <- population$year
+population <- population[, -1]
+
+sample_pro <- matrix(data = NA, nrow = 9, ncol = 7) %>% as.data.frame()
+rownames(sample_pro) <- seq(2022, 2030, 1)
+colnames(sample_pro) <- c("15_19", "20_24", "25_29", "30_34", "35_39", "40_44", "45_49")
+
+# Combine the data frames using rbind
+breast_DALYS <- rbind(breast_DALYS, sample_pro)
+
+# Create APCList object
+lc_esoph_5 <- APCList(breast_DALYS, population, gf = 5)
+
+# Perform Bayesian Age-Period-Cohort analysis
+bapc_result_1 <- BAPC(
+  lc_esoph_5,
+  predict = list(npredict = 10, retro = TRUE),
+  secondDiff = FALSE,
+  stdweight = wstand,
+  verbose = TRUE
+)
+
+plotBAPC(bapc_result_1, 
+         scale = 10^5, 
+         type = 'ageStdRate', 
+         showdata = TRUE
+)
+```
+
+
+
+```{r}
+slotNames(bapc_result_1)
+
+# 1) Extract Observed and Projected Means
+obs_all <- bapc_result_1@stdobs
+fit_proj <- bapc_result_1@agestd.proj[, "mean"]
+
+# 2) Align by Common Years
+common_years_proj <- intersect(names(obs_all), rownames(bapc_result_1@agestd.proj))
+obs_proj <- obs_all[common_years_proj]
+fit_proj <- fit_proj[common_years_proj]
+
+# 3) Compute Error Metrics
+MSE_proj  <- mean((obs_proj - fit_proj)^2, na.rm = TRUE)
+RMSE_proj <- sqrt(MSE_proj)
+MAE_proj  <- mean(abs(obs_proj - fit_proj), na.rm = TRUE)
+
+# WARNING: If obs_proj includes zeros, MAPE can be Inf
+MAPE_proj <- mean(abs(obs_proj - fit_proj) / obs_proj, na.rm = TRUE) * 100
+
+# 4) Print Results
+cat("=== Projected Accuracy Metrics (Years in Overlap) ===\n")
+cat("MSE:   ", MSE_proj,  "\n")
+cat("RMSE:  ", RMSE_proj, "\n")
+cat("MAE:   ", MAE_proj,  "\n")
+cat("MAPE:  ", MAPE_proj, "%\n\n")
+
+```
+
+
+```{r}
+non_zero_idx <- which(obs_proj > 0)
+MAPE_proj_no_zeros <- mean(
+  abs(obs_proj[non_zero_idx] - fit_proj[non_zero_idx]) / obs_proj[non_zero_idx],
+  na.rm = TRUE
+) * 100
+cat("MAPE (excluding zero obs):", MAPE_proj_no_zeros, "%\n")
+```
+
+
+
+
+```{r}
+cervical_DALYs <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/1990_2021_cervical_DALYs.csv")
+population <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/population3.csv")
+
+# Ensure that all relevant data is numeric
+cervical_DALYs[, -1] <- lapply(cervical_DALYs[, -1], as.numeric)
+population[, -1] <- lapply(population[, -1], as.numeric)
+
+# Function to remove 'X' prefix and convert to numeric
+clean_and_convert <- function(df) {
+  # Remove 'X' prefix from column names
+  names(df) <- gsub("^X", "", names(df))
+  
+  # Convert all columns except the first one to numeric
+  df[,-1] <- lapply(df[,-1], function(x) as.numeric(as.character(x)))
+  
+  return(df)
+}
+
+# Apply the function to both dataframes
+cervical_DALYs <- clean_and_convert(cervical_DALYs)
+population <- clean_and_convert(population)
+
+# Define standard weights for age-standardization
+wstand <- c(0.163, 0.158, 0.153, 0.146, 0.137, 0.127, 0.116)
+
+
+# Set the 'year' column as row names in 'sample'
+rownames(cervical_DALYs) <- cervical_DALYs$year
+cervical_DALYs <- cervical_DALYs[, -1]
+
+rownames(population) <- population$year
+population <- population[, -1]
+
+sample_pro <- matrix(data = NA, nrow = 9, ncol = 7) %>% as.data.frame()
+rownames(sample_pro) <- seq(2022, 2030, 1)
+colnames(sample_pro) <- c("15_19", "20_24", "25_29", "30_34", "35_39", "40_44", "45_49")
+
+# Combine the data frames using rbind
+cervical_DALYs <- rbind(cervical_DALYs, sample_pro)
+
+# Create APCList object
+lc_esoph_6 <- APCList(cervical_DALYs, population, gf = 5)
+
+# Perform Bayesian Age-Period-Cohort analysis
+bapc_result_2 <- BAPC(
+  lc_esoph_6,
+  predict = list(npredict = 10, retro = TRUE),
+  secondDiff = FALSE,
+  stdweight = wstand,
+  verbose = TRUE
+)
+
+plotBAPC(bapc_result_2, 
+         scale = 10^5, 
+         type = 'ageStdRate', 
+         showdata = TRUE
+)
+```
+
+
+
+```{r}
+slotNames(bapc_result_2)
+
+# 1) Extract Observed and Projected Means
+obs_all <- bapc_result_2@stdobs
+fit_proj <- bapc_result_2@agestd.proj[, "mean"]
+
+# 2) Align by Common Years
+common_years_proj <- intersect(names(obs_all), rownames(bapc_result_2@agestd.proj))
+obs_proj <- obs_all[common_years_proj]
+fit_proj <- fit_proj[common_years_proj]
+
+# 3) Compute Error Metrics
+MSE_proj  <- mean((obs_proj - fit_proj)^2, na.rm = TRUE)
+RMSE_proj <- sqrt(MSE_proj)
+MAE_proj  <- mean(abs(obs_proj - fit_proj), na.rm = TRUE)
+
+# WARNING: If obs_proj includes zeros, MAPE can be Inf
+MAPE_proj <- mean(abs(obs_proj - fit_proj) / obs_proj, na.rm = TRUE) * 100
+
+# 4) Print Results
+cat("=== Projected Accuracy Metrics (Years in Overlap) ===\n")
+cat("MSE:   ", MSE_proj,  "\n")
+cat("RMSE:  ", RMSE_proj, "\n")
+cat("MAE:   ", MAE_proj,  "\n")
+cat("MAPE:  ", MAPE_proj, "%\n\n")
+
+```
+
+
+```{r}
+non_zero_idx <- which(obs_proj > 0)
+MAPE_proj_no_zeros <- mean(
+  abs(obs_proj[non_zero_idx] - fit_proj[non_zero_idx]) / obs_proj[non_zero_idx],
+  na.rm = TRUE
+) * 100
+cat("MAPE (excluding zero obs):", MAPE_proj_no_zeros, "%\n")
+```
+
+
+
+
+```{r}
+ovarian_DALYs <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/1990_2021_ovarian_DALYs.csv")
+population <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/population3.csv")
+
+# Ensure that all relevant data is numeric
+ovarian_DALYs[, -1] <- lapply(ovarian_DALYs[, -1], as.numeric)
+population[, -1] <- lapply(population[, -1], as.numeric)
+
+# Function to remove 'X' prefix and convert to numeric
+clean_and_convert <- function(df) {
+  # Remove 'X' prefix from column names
+  names(df) <- gsub("^X", "", names(df))
+  
+  # Convert all columns except the first one to numeric
+  df[,-1] <- lapply(df[,-1], function(x) as.numeric(as.character(x)))
+  
+  return(df)
+}
+
+# Apply the function to both dataframes
+ovarian_DALYs <- clean_and_convert(ovarian_DALYs)
+population <- clean_and_convert(population)
+
+# Define standard weights for age-standardization
+wstand <- c(0.163, 0.158, 0.153, 0.146, 0.137, 0.127, 0.116)
+
+
+# Set the 'year' column as row names in 'sample'
+rownames(ovarian_DALYs) <- ovarian_DALYs$year
+ovarian_DALYs <- ovarian_DALYs[, -1]
+
+rownames(population) <- population$year
+population <- population[, -1]
+
+sample_pro <- matrix(data = NA, nrow = 9, ncol = 7) %>% as.data.frame()
+rownames(sample_pro) <- seq(2022, 2030, 1)
+colnames(sample_pro) <- c("15_19", "20_24", "25_29", "30_34", "35_39", "40_44", "45_49")
+
+# Combine the data frames using rbind
+ovarian_DALYs <- rbind(ovarian_DALYs, sample_pro)
+
+# Create APCList object
+lc_esoph_7 <- APCList(ovarian_DALYs, population, gf = 5)
+
+# Perform Bayesian Age-Period-Cohort analysis
+bapc_result_3 <- BAPC(
+  lc_esoph_7,
+  predict = list(npredict = 10, retro = TRUE),
+  secondDiff = FALSE,
+  stdweight = wstand,
+  verbose = TRUE
+)
+
+plotBAPC(bapc_result_3, 
+         scale = 10^5, 
+         type = 'ageStdRate', 
+         showdata = TRUE
+)
+```
+
+
+
+```{r}
+slotNames(bapc_result_3)
+
+# 1) Extract Observed and Projected Means
+obs_all <- bapc_result_3@stdobs
+fit_proj <- bapc_result_3@agestd.proj[, "mean"]
+
+# 2) Align by Common Years
+common_years_proj <- intersect(names(obs_all), rownames(bapc_result_3@agestd.proj))
+obs_proj <- obs_all[common_years_proj]
+fit_proj <- fit_proj[common_years_proj]
+
+# 3) Compute Error Metrics
+MSE_proj  <- mean((obs_proj - fit_proj)^2, na.rm = TRUE)
+RMSE_proj <- sqrt(MSE_proj)
+MAE_proj  <- mean(abs(obs_proj - fit_proj), na.rm = TRUE)
+
+# WARNING: If obs_proj includes zeros, MAPE can be Inf
+MAPE_proj <- mean(abs(obs_proj - fit_proj) / obs_proj, na.rm = TRUE) * 100
+
+# 4) Print Results
+cat("=== Projected Accuracy Metrics (Years in Overlap) ===\n")
+cat("MSE:   ", MSE_proj,  "\n")
+cat("RMSE:  ", RMSE_proj, "\n")
+cat("MAE:   ", MAE_proj,  "\n")
+cat("MAPE:  ", MAPE_proj, "%\n\n")
+
+```
+
+
+```{r}
+non_zero_idx <- which(obs_proj > 0)
+MAPE_proj_no_zeros <- mean(
+  abs(obs_proj[non_zero_idx] - fit_proj[non_zero_idx]) / obs_proj[non_zero_idx],
+  na.rm = TRUE
+) * 100
+cat("MAPE (excluding zero obs):", MAPE_proj_no_zeros, "%\n")
+```
+
+
+
+```{r}
+uterine_DALYs <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/1990_2021_uterine_DALYs.csv")
+population <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/population3.csv")
+
+# Ensure that all relevant data is numeric
+uterine_DALYs[, -1] <- lapply(uterine_DALYs[, -1], as.numeric)
+population[, -1] <- lapply(population[, -1], as.numeric)
+
+# Function to remove 'X' prefix and convert to numeric
+clean_and_convert <- function(df) {
+  # Remove 'X' prefix from column names
+  names(df) <- gsub("^X", "", names(df))
+  
+  # Convert all columns except the first one to numeric
+  df[,-1] <- lapply(df[,-1], function(x) as.numeric(as.character(x)))
+  
+  return(df)
+}
+
+# Apply the function to both dataframes
+uterine_DALYs <- clean_and_convert(uterine_DALYs)
+population <- clean_and_convert(population)
+
+# Define standard weights for age-standardization
+wstand <- c(0.163, 0.158, 0.153, 0.146, 0.137, 0.127, 0.116)
+
+
+# Set the 'year' column as row names in 'sample'
+rownames(uterine_DALYs) <- uterine_DALYs$year
+uterine_DALYs <- uterine_DALYs[, -1]
+
+rownames(population) <- population$year
+population <- population[, -1]
+
+sample_pro <- matrix(data = NA, nrow = 9, ncol = 7) %>% as.data.frame()
+rownames(sample_pro) <- seq(2022, 2030, 1)
+colnames(sample_pro) <- c("15_19", "20_24", "25_29", "30_34", "35_39", "40_44", "45_49")
+
+# Combine the data frames using rbind
+uterine_DALYs <- rbind(uterine_DALYs, sample_pro)
+
+# Create APCList object
+lc_esoph_8 <- APCList(uterine_DALYs, population, gf = 5)
+
+# Perform Bayesian Age-Period-Cohort analysis
+bapc_result_4 <- BAPC(
+  lc_esoph_8,
+  predict = list(npredict = 10, retro = TRUE),
+  secondDiff = FALSE,
+  stdweight = wstand,
+  verbose = TRUE
+)
+
+plotBAPC(bapc_result_4, 
+         scale = 10^5, 
+         type = 'ageStdRate', 
+         showdata = TRUE
+)
+```
+
+
+
+```{r}
+slotNames(bapc_result_4)
+
+# 1) Extract Observed and Projected Means
+obs_all <- bapc_result_4@stdobs
+fit_proj <- bapc_result_4@agestd.proj[, "mean"]
+
+# 2) Align by Common Years
+common_years_proj <- intersect(names(obs_all), rownames(bapc_result_4@agestd.proj))
+obs_proj <- obs_all[common_years_proj]
+fit_proj <- fit_proj[common_years_proj]
+
+# 3) Compute Error Metrics
+MSE_proj  <- mean((obs_proj - fit_proj)^2, na.rm = TRUE)
+RMSE_proj <- sqrt(MSE_proj)
+MAE_proj  <- mean(abs(obs_proj - fit_proj), na.rm = TRUE)
+
+# WARNING: If obs_proj includes zeros, MAPE can be Inf
+MAPE_proj <- mean(abs(obs_proj - fit_proj) / obs_proj, na.rm = TRUE) * 100
+
+# 4) Print Results
+cat("=== Projected Accuracy Metrics (Years in Overlap) ===\n")
+cat("MSE:   ", MSE_proj,  "\n")
+cat("RMSE:  ", RMSE_proj, "\n")
+cat("MAE:   ", MAE_proj,  "\n")
+cat("MAPE:  ", MAPE_proj, "%\n\n")
+
+```
+
+
+```{r}
+non_zero_idx <- which(obs_proj > 0)
+MAPE_proj_no_zeros <- mean(
+  abs(obs_proj[non_zero_idx] - fit_proj[non_zero_idx]) / obs_proj[non_zero_idx],
+  na.rm = TRUE
+) * 100
+cat("MAPE (excluding zero obs):", MAPE_proj_no_zeros, "%\n")
+```
+
+
+
+```{r}
+Breast_death <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/1990_2021_Breast_death.csv")
+population <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/population3.csv")
+
+# Ensure that all relevant data is numeric
+Breast_death[, -1] <- lapply(Breast_death[, -1], as.numeric)
+population[, -1] <- lapply(population[, -1], as.numeric)
+
+# Function to remove 'X' prefix and convert to numeric
+clean_and_convert <- function(df) {
+  # Remove 'X' prefix from column names
+  names(df) <- gsub("^X", "", names(df))
+  
+  # Convert all columns except the first one to numeric
+  df[,-1] <- lapply(df[,-1], function(x) as.numeric(as.character(x)))
+  
+  return(df)
+}
+
+# Apply the function to both dataframes
+Breast_death <- clean_and_convert(Breast_death)
+population <- clean_and_convert(population)
+
+# Define standard weights for age-standardization
+wstand <- c(0.163, 0.158, 0.153, 0.146, 0.137, 0.127, 0.116)
+
+
+# Set the 'year' column as row names in 'sample'
+rownames(Breast_death) <- Breast_death$year
+Breast_death <- Breast_death[, -1]
+
+rownames(population) <- population$year
+population <- population[, -1]
+
+sample_pro <- matrix(data = NA, nrow = 9, ncol = 7) %>% as.data.frame()
+rownames(sample_pro) <- seq(2022, 2030, 1)
+colnames(sample_pro) <- c("15_19", "20_24", "25_29", "30_34", "35_39", "40_44", "45_49")
+
+# Combine the data frames using rbind
+Breast_death <- rbind(Breast_death, sample_pro)
+
+# Create APCList object
+lc_esoph_9 <- APCList(Breast_death, population, gf = 5)
+
+# Perform Bayesian Age-Period-Cohort analysis
+bapc_result_5 <- BAPC(
+  lc_esoph_9,
+  predict = list(npredict = 10, retro = TRUE),
+  secondDiff = FALSE,
+  stdweight = wstand,
+  verbose = TRUE
+)
+
+plotBAPC(bapc_result_5, 
+         scale = 10^5, 
+         type = 'ageStdRate', 
+         showdata = TRUE
+)
+```
+
+
+```{r}
+slotNames(bapc_result_5)
+
+# 1) Extract Observed and Projected Means
+obs_all <- bapc_result_5@stdobs
+fit_proj <- bapc_result_5@agestd.proj[, "mean"]
+
+# 2) Align by Common Years
+common_years_proj <- intersect(names(obs_all), rownames(bapc_result_5@agestd.proj))
+obs_proj <- obs_all[common_years_proj]
+fit_proj <- fit_proj[common_years_proj]
+
+# 3) Compute Error Metrics
+MSE_proj  <- mean((obs_proj - fit_proj)^2, na.rm = TRUE)
+RMSE_proj <- sqrt(MSE_proj)
+MAE_proj  <- mean(abs(obs_proj - fit_proj), na.rm = TRUE)
+
+# WARNING: If obs_proj includes zeros, MAPE can be Inf
+MAPE_proj <- mean(abs(obs_proj - fit_proj) / obs_proj, na.rm = TRUE) * 100
+
+# 4) Print Results
+cat("=== Projected Accuracy Metrics (Years in Overlap) ===\n")
+cat("MSE:   ", MSE_proj,  "\n")
+cat("RMSE:  ", RMSE_proj, "\n")
+cat("MAE:   ", MAE_proj,  "\n")
+cat("MAPE:  ", MAPE_proj, "%\n\n")
+
+```
+
+
+```{r}
+non_zero_idx <- which(obs_proj > 0)
+MAPE_proj_no_zeros <- mean(
+  abs(obs_proj[non_zero_idx] - fit_proj[non_zero_idx]) / obs_proj[non_zero_idx],
+  na.rm = TRUE
+) * 100
+cat("MAPE (excluding zero obs):", MAPE_proj_no_zeros, "%\n")
+```
+
+
+
+```{r}
+Cervical_death <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/1990_2021_Cervical_death.csv")
+population <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/population3.csv")
+
+# Ensure that all relevant data is numeric
+Cervical_death[, -1] <- lapply(Cervical_death[, -1], as.numeric)
+population[, -1] <- lapply(population[, -1], as.numeric)
+
+# Function to remove 'X' prefix and convert to numeric
+clean_and_convert <- function(df) {
+  # Remove 'X' prefix from column names
+  names(df) <- gsub("^X", "", names(df))
+  
+  # Convert all columns except the first one to numeric
+  df[,-1] <- lapply(df[,-1], function(x) as.numeric(as.character(x)))
+  
+  return(df)
+}
+
+# Apply the function to both dataframes
+Cervical_death <- clean_and_convert(Cervical_death)
+population <- clean_and_convert(population)
+
+# Define standard weights for age-standardization
+wstand <- c(0.163, 0.158, 0.153, 0.146, 0.137, 0.127, 0.116)
+
+
+# Set the 'year' column as row names in 'sample'
+rownames(Cervical_death) <- Cervical_death$year
+Cervical_death <- Cervical_death[, -1]
+
+rownames(population) <- population$year
+population <- population[, -1]
+
+sample_pro <- matrix(data = NA, nrow = 9, ncol = 7) %>% as.data.frame()
+rownames(sample_pro) <- seq(2022, 2030, 1)
+colnames(sample_pro) <- c("15_19", "20_24", "25_29", "30_34", "35_39", "40_44", "45_49")
+
+# Combine the data frames using rbind
+Cervical_death <- rbind(Cervical_death, sample_pro)
+
+# Create APCList object
+lc_esoph_10 <- APCList(Cervical_death, population, gf = 5)
+
+# Perform Bayesian Age-Period-Cohort analysis
+bapc_result_6 <- BAPC(
+  lc_esoph_10,
+  predict = list(npredict = 10, retro = TRUE),
+  secondDiff = FALSE,
+  stdweight = wstand,
+  verbose = TRUE
+)
+
+plotBAPC(bapc_result_6, 
+         scale = 10^5, 
+         type = 'ageStdRate', 
+         showdata = TRUE
+)
+```
+
+
+```{r}
+slotNames(bapc_result_6)
+
+# 1) Extract Observed and Projected Means
+obs_all <- bapc_result_6@stdobs
+fit_proj <- bapc_result_6@agestd.proj[, "mean"]
+
+# 2) Align by Common Years
+common_years_proj <- intersect(names(obs_all), rownames(bapc_result_6@agestd.proj))
+obs_proj <- obs_all[common_years_proj]
+fit_proj <- fit_proj[common_years_proj]
+
+# 3) Compute Error Metrics
+MSE_proj  <- mean((obs_proj - fit_proj)^2, na.rm = TRUE)
+RMSE_proj <- sqrt(MSE_proj)
+MAE_proj  <- mean(abs(obs_proj - fit_proj), na.rm = TRUE)
+
+# WARNING: If obs_proj includes zeros, MAPE can be Inf
+MAPE_proj <- mean(abs(obs_proj - fit_proj) / obs_proj, na.rm = TRUE) * 100
+
+# 4) Print Results
+cat("=== Projected Accuracy Metrics (Years in Overlap) ===\n")
+cat("MSE:   ", MSE_proj,  "\n")
+cat("RMSE:  ", RMSE_proj, "\n")
+cat("MAE:   ", MAE_proj,  "\n")
+cat("MAPE:  ", MAPE_proj, "%\n\n")
+
+```
+
+
+```{r}
+non_zero_idx <- which(obs_proj > 0)
+MAPE_proj_no_zeros <- mean(
+  abs(obs_proj[non_zero_idx] - fit_proj[non_zero_idx]) / obs_proj[non_zero_idx],
+  na.rm = TRUE
+) * 100
+cat("MAPE (excluding zero obs):", MAPE_proj_no_zeros, "%\n")
+```
+
+
+
+```{r}
+Ovarian_death <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/1990_2021_Ovarian_death.csv")
+population <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/population3.csv")
+
+# Ensure that all relevant data is numeric
+Ovarian_death[, -1] <- lapply(Ovarian_death[, -1], as.numeric)
+population[, -1] <- lapply(population[, -1], as.numeric)
+
+# Function to remove 'X' prefix and convert to numeric
+clean_and_convert <- function(df) {
+  # Remove 'X' prefix from column names
+  names(df) <- gsub("^X", "", names(df))
+  
+  # Convert all columns except the first one to numeric
+  df[,-1] <- lapply(df[,-1], function(x) as.numeric(as.character(x)))
+  
+  return(df)
+}
+
+# Apply the function to both dataframes
+Ovarian_death <- clean_and_convert(Ovarian_death)
+population <- clean_and_convert(population)
+
+# Define standard weights for age-standardization
+wstand <- c(0.163, 0.158, 0.153, 0.146, 0.137, 0.127, 0.116)
+
+
+# Set the 'year' column as row names in 'sample'
+rownames(Ovarian_death) <- Ovarian_death$year
+Ovarian_death <- Ovarian_death[, -1]
+
+rownames(population) <- population$year
+population <- population[, -1]
+
+sample_pro <- matrix(data = NA, nrow = 9, ncol = 7) %>% as.data.frame()
+rownames(sample_pro) <- seq(2022, 2030, 1)
+colnames(sample_pro) <- c("15_19", "20_24", "25_29", "30_34", "35_39", "40_44", "45_49")
+
+# Combine the data frames using rbind
+Ovarian_death <- rbind(Ovarian_death, sample_pro)
+
+# Create APCList object
+lc_esoph_11 <- APCList(Ovarian_death, population, gf = 5)
+
+# Perform Bayesian Age-Period-Cohort analysis
+bapc_result_7 <- BAPC(
+  lc_esoph_11,
+  predict = list(npredict = 10, retro = TRUE),
+  secondDiff = FALSE,
+  stdweight = wstand,
+  verbose = TRUE
+)
+
+plotBAPC(bapc_result_7, 
+         scale = 10^5, 
+         type = 'ageStdRate', 
+         showdata = TRUE
+)
+```
+
+
+```{r}
+slotNames(bapc_result_7)
+
+# 1) Extract Observed and Projected Means
+obs_all <- bapc_result_7@stdobs
+fit_proj <- bapc_result_7@agestd.proj[, "mean"]
+
+# 2) Align by Common Years
+common_years_proj <- intersect(names(obs_all), rownames(bapc_result_7@agestd.proj))
+obs_proj <- obs_all[common_years_proj]
+fit_proj <- fit_proj[common_years_proj]
+
+# 3) Compute Error Metrics
+MSE_proj  <- mean((obs_proj - fit_proj)^2, na.rm = TRUE)
+RMSE_proj <- sqrt(MSE_proj)
+MAE_proj  <- mean(abs(obs_proj - fit_proj), na.rm = TRUE)
+
+# WARNING: If obs_proj includes zeros, MAPE can be Inf
+MAPE_proj <- mean(abs(obs_proj - fit_proj) / obs_proj, na.rm = TRUE) * 100
+
+# 4) Print Results
+cat("=== Projected Accuracy Metrics (Years in Overlap) ===\n")
+cat("MSE:   ", MSE_proj,  "\n")
+cat("RMSE:  ", RMSE_proj, "\n")
+cat("MAE:   ", MAE_proj,  "\n")
+cat("MAPE:  ", MAPE_proj, "%\n\n")
+
+```
+
+
+```{r}
+non_zero_idx <- which(obs_proj > 0)
+MAPE_proj_no_zeros <- mean(
+  abs(obs_proj[non_zero_idx] - fit_proj[non_zero_idx]) / obs_proj[non_zero_idx],
+  na.rm = TRUE
+) * 100
+cat("MAPE (excluding zero obs):", MAPE_proj_no_zeros, "%\n")
+```
+
+
+
+
+```{r}
+Uterine_death <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/1990_2021_Uterine_death.csv")
+population <- read.csv("/Users/cristochow/Desktop/daily_work/task_15/forecast/population4.csv")
+
+# Ensure that all relevant data is numeric
+Uterine_death[, -1] <- lapply(Uterine_death[, -1], as.numeric)
+population[, -1] <- lapply(population[, -1], as.numeric)
+
+# Function to remove 'X' prefix and convert to numeric
+clean_and_convert <- function(df) {
+  # Remove 'X' prefix from column names
+  names(df) <- gsub("^X", "", names(df))
+  
+  # Convert all columns except the first one to numeric
+  df[,-1] <- lapply(df[,-1], function(x) as.numeric(as.character(x)))
+  
+  return(df)
+}
+
+# Apply the function to both dataframes
+Uterine_death <- clean_and_convert(Uterine_death)
+population <- clean_and_convert(population)
+
+# Define standard weights for age-standardization
+wstand <- c(0.189, 0.182, 0.175, 0.164, 0.151, 0.139)
+
+
+# Set the 'year' column as row names in 'sample'
+rownames(Uterine_death) <- Uterine_death$year
+Uterine_death <- Uterine_death[, -1]
+
+rownames(population) <- population$year
+population <- population[, -1]
+
+sample_pro <- matrix(data = NA, nrow = 9, ncol = 6) %>% as.data.frame()
+rownames(sample_pro) <- seq(2022, 2030, 1)
+colnames(sample_pro) <- c("20_24", "25_29", "30_34", "35_39", "40_44", "45_49")
+
+# Combine the data frames using rbind
+Uterine_death <- rbind(Uterine_death, sample_pro)
+
+# Create APCList object
+lc_esoph_12 <- APCList(Uterine_death, population, gf = 5)
+
+# Perform Bayesian Age-Period-Cohort analysis
+bapc_result_8 <- BAPC(
+  lc_esoph_12,
+  predict = list(npredict = 10, retro = TRUE),
+  secondDiff = FALSE,
+  stdweight = wstand,
+  verbose = TRUE
+)
+
+plotBAPC(bapc_result_8, 
+         scale = 10^5, 
+         type = 'ageStdRate', 
+         showdata = TRUE
+)
+```
+
+
+```{r}
+slotNames(bapc_result_8)
+
+# 1) Extract Observed and Projected Means
+obs_all <- bapc_result_8@stdobs
+fit_proj <- bapc_result_8@agestd.proj[, "mean"]
+
+# 2) Align by Common Years
+common_years_proj <- intersect(names(obs_all), rownames(bapc_result_8@agestd.proj))
+obs_proj <- obs_all[common_years_proj]
+fit_proj <- fit_proj[common_years_proj]
+
+# 3) Compute Error Metrics
+MSE_proj  <- mean((obs_proj - fit_proj)^2, na.rm = TRUE)
+RMSE_proj <- sqrt(MSE_proj)
+MAE_proj  <- mean(abs(obs_proj - fit_proj), na.rm = TRUE)
+
+# WARNING: If obs_proj includes zeros, MAPE can be Inf
+MAPE_proj <- mean(abs(obs_proj - fit_proj) / obs_proj, na.rm = TRUE) * 100
+
+# 4) Print Results
+cat("=== Projected Accuracy Metrics (Years in Overlap) ===\n")
+cat("MSE:   ", MSE_proj,  "\n")
+cat("RMSE:  ", RMSE_proj, "\n")
+cat("MAE:   ", MAE_proj,  "\n")
+cat("MAPE:  ", MAPE_proj, "%\n\n")
+
+```
+
+
+```{r}
+non_zero_idx <- which(obs_proj > 0)
+MAPE_proj_no_zeros <- mean(
+  abs(obs_proj[non_zero_idx] - fit_proj[non_zero_idx]) / obs_proj[non_zero_idx],
+  na.rm = TRUE
+) * 100
+cat("MAPE (excluding zero obs):", MAPE_proj_no_zeros, "%\n")
+```
+
+
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+
+```{r}
+
+```
+
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+
+```{r}
+colors <- c(
+  "#8da0cb", "#fc8d62", "#66c2a5", "#a6d854", "#ffd92f",  # Original set
+  "#e78ac3", "#a6cee3", "#b2df8a", "#cab2d6", "#fdbf6f",  # Additional colors
+  "#1f78b4", "#33a02c", "#fb9a99", "#e31a1c", "#ff7f00",  # Even more options
+  "#6a3d9a", "#b15928", "#bc80bd", "#ccebc5", "#ffed6f"   # And some more
+)
+
+```
+
+
+#plot
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+breast <- read.csv("/Users/cristochow/Desktop/daily_work//task_15/risk_factor_Death/breast_risk/breast.csv")
+
+position_dodge2 <- position_dodge(width = 0.8)
+
+# Plotting
+
+ggplot(breast, aes(x = location, y = val, fill = rei)) +
+  geom_bar(stat = "identity", position = position_dodge2()) +
+  facet_wrap(~ measure, scales = "free_x") +
+  labs(y = "Proportion of Death/DALYs (%)", x = "SDI Quintile",
+       title = "Proportion of Death/DALYs from Breast cancer attributable to leading risk factors",
+       fill = "Risk Factor") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1.5),
+    plot.margin = margin(t = 50, r = 20, b = 20, l = 20)  # Increase top margin to give space for the title
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_y_continuous(limits = c(-6, 16), breaks = seq(-6, 16, by = 4)) +
+  scale_fill_manual(values = c("#8da0cb","#1f78b4", "#fb9a99", "#66c2a5", "#a6d854", "#ffd92f")) +  # Specify non-blue and non-red colors
+  coord_flip()
+
+
+```
+
+
+```{r}
+Uterine <- read.csv("/Users/cristochow/Desktop/daily_work//task_15/risk_factor_Death/Uterine_risk/Uterine.csv")
+
+# Plotting
+
+ggplot(Uterine, aes(x = location, y = val, fill = rei)) +
+  geom_bar(stat = "identity", position = position_dodge2) +
+  facet_wrap(~ measure, scales = "free_x") +
+  labs(y = "Proportion of Death/DALYs (%)", x = "SDI Quintile",
+       title = "Proportion of Death/DALYs from Uterine cancer attributable to leading risk factors",
+       fill = "Risk Factor") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1.5),
+    plot.margin = margin(t = 50, r = 20, b = 20, l = 20)  # Increase top margin to give space for the title
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_y_continuous(limits = c(0, 40), breaks = seq(0, 40, by = 10)) +
+  scale_fill_manual(values = c("#fb9a99")) +  # Specify non-blue and non-red colors
+  coord_flip()
+```
+
+
+```{r}
+Ovarian <- read.csv("/Users/cristochow/Desktop/daily_work//task_15/risk_factor_Death/Ovarian_risk/Ovarian_risk.csv")
+
+# Plotting
+
+ggplot(Ovarian, aes(x = location, y = val, fill = rei)) +
+  geom_bar(stat = "identity", position = position_dodge2) +
+  facet_wrap(~ measure, scales = "free_x") +
+  labs(y = "Proportion of Death/DALYs (%)", x = "SDI Quintile",
+       title = "Proportion of Death/DALYs from Ovarian cancer attributable to leading risk factors",
+       fill = "Risk Factor") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1.5),
+    plot.margin = margin(t = 50, r = 20, b = 20, l = 20)  # Increase top margin to give space for the title
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_y_continuous(limits = c(0, 10), breaks = seq(0, 10, by = 1)) +
+  scale_fill_manual(values = c("#fb9a99", "#66c2a5")) +  # Specify non-blue and non-red colors
+  coord_flip()
+```
+
+
+```{r}
+Cervical <- read.csv("/Users/cristochow/Desktop/daily_work//task_15/risk_factor_Death/Cervical_risk/Cervical_risk.csv")
+
+# Plotting
+
+ggplot(Cervical, aes(x = location, y = val, fill = rei)) +
+  geom_bar(stat = "identity", position = position_dodge2()) +
+  facet_wrap(~ measure, scales = "free_x") +
+  labs(y = "Proportion of Death/DALYs (%)", x = "SDI Quintile",
+       title = "Proportion of Death/DALYs from Cervical cancer attributable to leading risk factors",
+       fill = "Risk Factor") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1.5),
+    plot.margin = margin(t = 50, r = 20, b = 20, l = 20)  # Increase top margin to give space for the title
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_y_continuous(breaks = seq(0, 100, by = 20), labels = abs(seq(0, 100, by = 20))) +
+  scale_fill_manual(values = c("#ffd92f", "#b15928")) +  # Specify non-blue and non-red colors
+  coord_flip()
+```
+
+```{r}
+#death number-breast
+# Load the data
+breast_deathnum <- read.csv("/Users/cristochow/Desktop/daily_work//task_15/risk_factor_Death/Breast_risk/breastdeathnum.csv")
+
+position_dodge2 <- position_dodge(width = 0.8)
+
+# Plotting
+
+ggplot(breast_deathnum, aes(x = location, y = val, fill = rei)) +
+  geom_bar(stat = "identity", position = position_dodge2()) +
+  facet_wrap(~ measure, scales = "free_x") +
+  labs(y = "Number of Death", x = "SDI Quintile",
+       title = "Risk-attributable child-bearing female breast cancer Death Number",
+       fill = "Risk Factor") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1.5),
+    plot.margin = margin(t = 50, r = 20, b = 20, l = 20)  # Increase top margin to give space for the title
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_fill_manual(values = c("#8da0cb","#1f78b4", "#fb9a99", "#66c2a5", "#a6d854", "#ffd92f")) +  # Specify non-blue and non-red colors
+  coord_flip()
+```
+
+
+```{r}
+#death number-Uterine
+# Load the data
+Uterine_deathnum <- read.csv("/Users/cristochow/Desktop/daily_work//task_15/risk_factor_Death/Uterine_risk/Uterine_deathnum.csv")
+
+position_dodge2 <- position_dodge(width = 0.8)
+
+# Plotting
+
+ggplot(Uterine_deathnum, aes(x = location, y = val, fill = rei)) +
+  geom_bar(stat = "identity", position = position_dodge2()) +
+  facet_wrap(~ measure, scales = "free_x") +
+  labs(y = "Number of Death", x = "SDI Quintile",
+       title = "Risk-attributable child-bearing female Uterine cancer Death Number",
+       fill = "Risk Factor") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1.5),
+    plot.margin = margin(t = 50, r = 20, b = 20, l = 20)  # Increase top margin to give space for the title
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_fill_manual(values = c("#fb9a99")) +  # Specify non-blue and non-red colors
+  coord_flip()
+```
+
+
+```{r}
+#death number-Ora
+# Load the data
+Ovarian_deathnum <- read.csv("/Users/cristochow/Desktop/daily_work//task_15/risk_factor_Death/Ovarian_risk/Ovarian_deathnum.csv")
+
+position_dodge2 <- position_dodge(width = 0.8)
+
+# Plotting
+
+ggplot(Ovarian_deathnum, aes(x = location, y = val, fill = rei)) +
+  geom_bar(stat = "identity", position = position_dodge2()) +
+  facet_wrap(~ measure, scales = "free_x") +
+  labs(y = "Number of Death", x = "SDI Quintile",
+       title = "Risk-attributable child-bearing female Ovarian cancer Death Number",
+       fill = "Risk Factor") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1.5),
+    plot.margin = margin(t = 50, r = 20, b = 20, l = 20)  # Increase top margin to give space for the title
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_fill_manual(values = c("#fb9a99", "#66c2a5")) +  # Specify non-blue and non-red colors
+  coord_flip()
+```
+
+
+```{r}
+#death number-Cervical
+# Load the data
+Cervical_deathnum <- read.csv("/Users/cristochow/Desktop/daily_work//task_15/risk_factor_Death/Cervical_risk/Cervical_deathnum.csv")
+
+position_dodge2 <- position_dodge(width = 0.8)
+
+# Plotting
+
+ggplot(Cervical_deathnum, aes(x = location, y = val, fill = rei)) +
+  geom_bar(stat = "identity", position = position_dodge2()) +
+  facet_wrap(~ measure, scales = "free_x") +
+  labs(y = "Number of Death", x = "SDI Quintile",
+       title = "Risk-attributable child-bearing female Cervical cancer Death Number",
+       fill = "Risk Factor") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1.5),
+    plot.margin = margin(t = 50, r = 20, b = 20, l = 20)  # Increase top margin to give space for the title
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  scale_fill_manual(values = c("#ffd92f", "#b15928")) +  # Specify non-blue and non-red colors
+  coord_flip()
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+
+```
+
+
+
+```{r}
+#map_breast_tobacoo
+library(sf)
+library(rnaturalearth)
+library(rnaturalearthdata)
+Breast_tobacoomap <- read.csv("/Users/cristochow/Desktop/daily_work//task_15/risk_factor_Death/breastmap_tabacoo/tabocoo.csv")
+
+
+# Preprocess data to get the relevant columns
+data_filtered <- Breast_tobacoomap %>%
+  filter(measure == "Deaths" & cause == "Breast cancer" & rei == "Tobacco" & metric == "Rate") %>%
+  select(location, val)
+
+# Load world map data
+word_data <- map_data('world')
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Merge the world map data with our data
+world_data <- world %>%
+  left_join(data_filtered, by = c("name" = "location"))
+
+# Create bins for the rate of change with specified ranges
+world_data <- world_data %>%
+  mutate(val_bin = cut(val, 
+                       breaks = c(-Inf, -0.5, 0, 0.5, Inf), 
+                       labels = c("Q1: <= -0.5", "Q2: -0.5 to 0", "Q3: 0 to 0.5", "Q4: > 0.5"), 
+                       include.lowest = TRUE))
+
+# Plot the world map
+ggplot(data = world_data) +
+  geom_sf(aes(fill = val_bin), color = "gray", na.fill = "gray") +
+  scale_fill_manual(values = c("Q1: <= -0.5" = "yellow", "Q2: -0.5 to 0" = "orange", "Q3: 0 to 0.5" = "red", "Q4: > 0.5" = "darkred"), na.translate = FALSE) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1.5),
+    plot.margin = margin(t = 50, r = 20, b = 20, l = 20)  # Increase top margin to give space for the title
+  ) +
+  theme(panel.grid.major = element_blank(), # Remove major grid lines
+        panel.grid.minor = element_blank()) + # Remove minor grid lines
+  labs(title = "Annualised rate of change in the death rate of breast cancer attributable to Tobacco, 1990–2021",
+       fill = "Death Rate of Change") +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+world_map <- ne_countries(scale = 50, returnclass = 'sf')
+```
+
+
+```{r}
+#map_breast_alcohol
+Breast_alcoholmap <- read.csv("/Users/cristochow/Desktop/daily_work//task_15/risk_factor_Death/breastmap_alcohol/alcohol_risk.csv")
+
+
+# Preprocess data to get the relevant columns
+data_filtered <- Breast_alcoholmap %>%
+  filter(measure == "Deaths" & cause == "Breast cancer" & rei == "Alcohol use" & metric == "Rate") %>%
+  select(location, val)
+
+# Load world map data
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Merge the world map data with our data
+world_data <- world %>%
+  left_join(data_filtered, by = c("name" = "location"))
+
+# Create bins for the rate of change with specified ranges
+world_data <- world_data %>%
+  mutate(val_bin = cut(val, 
+                       breaks = c(-Inf, -0.5, 0, 0.5, Inf), 
+                       labels = c("Q1: <= -0.5", "Q2: -0.5 to 0", "Q3: 0 to 0.5", "Q4: > 0.5"), 
+                       include.lowest = TRUE))
+
+# Plot the world map
+ggplot(data = world_data) +
+  geom_sf(aes(fill = val_bin), color = "gray", na.fill = "gray") +
+  scale_fill_manual(values = c("Q1: <= -0.5" = "yellow", "Q2: -0.5 to 0" = "orange", "Q3: 0 to 0.5" = "red", "Q4: > 0.5" = "darkred"), na.translate = FALSE) +theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1.5),
+    plot.margin = margin(t = 50, r = 20, b = 20, l = 20)  # Increase top margin to give space for the title
+  ) +
+  theme(panel.grid.major = element_blank(), # Remove major grid lines
+        panel.grid.minor = element_blank()) + # Remove minor grid lines
+  labs(title = "Annualised rate of change in the death rate of breast cancer attributable to Alcohol, 1990–2021",
+       fill = "Death Rate of Change") +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+#Uterine cancer BMI risk map
+Uter_map <- read.csv("/Users/cristochow/Desktop/daily_work//task_15/risk_factor_Death/Utermap_BMI/U_BMIrisk.csv")
+
+
+# Preprocess data to get the relevant columns
+data_filtered <- Uter_map %>%
+  filter(measure == "Deaths" & cause == "Uterine cancer" & rei == "High body-mass index" & metric == "Rate") %>%
+  select(location, val)
+
+# Load world map data
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Merge the world map data with our data
+world_data <- world %>%
+  left_join(data_filtered, by = c("name" = "location"))
+
+# Create bins for the rate of change with specified ranges
+world_data <- world_data %>%
+  mutate(val_bin = cut(val, 
+                       breaks = c(-Inf, -0.5, 0, 0.5, Inf), 
+                       labels = c("Q1: <= -0.5", "Q2: -0.5 to 0", "Q3: 0 to 0.5", "Q4: > 0.5"), 
+                       include.lowest = TRUE))
+
+# Plot the world map
+ggplot(data = world_data) +
+  geom_sf(aes(fill = val_bin), color = "gray", na.fill = "gray") +
+  scale_fill_manual(values = c("Q1: <= -0.5" = "yellow", "Q2: -0.5 to 0" = "orange", "Q3: 0 to 0.5" = "red", "Q4: > 0.5" = "darkred"), na.translate = FALSE) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1.5),
+    plot.margin = margin(t = 50, r = 20, b = 20, l = 20)  # Increase top margin to give space for the title
+  ) +
+  theme(panel.grid.major = element_blank(), # Remove major grid lines
+        panel.grid.minor = element_blank()) + # Remove minor grid lines
+  labs(title = "Annualised rate of change in the death rate of Uterine cancer attributable to High BMI, 1990–2021",
+       fill = "Death Rate of Change") +
+  theme(legend.position = "bottom")
+```
+
+
+```{r}
+#Ovarian cancer BMI risk map
+Ovarian_BMI <- read.csv("/Users/cristochow/Desktop/daily_work//task_15/risk_factor_Death/Ovarian_BMI/Ovarian_BMIrisk.csv")
+
+
+# Preprocess data to get the relevant columns
+data_filtered <- Ovarian_BMI %>%
+  filter(measure == "Deaths" & cause == "Ovarian cancer" & rei == "High body-mass index" & metric == "Rate") %>%
+  select(location, val)
+
+# Load world map data
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Merge the world map data with our data
+world_data <- world %>%
+  left_join(data_filtered, by = c("name" = "location"))
+
+# Create bins for the rate of change with specified ranges
+world_data <- world_data %>%
+  mutate(val_bin = cut(val, 
+                       breaks = c(-Inf, -0.5, 0, 0.5, Inf), 
+                       labels = c("Q1: <= -0.5", "Q2: -0.5 to 0", "Q3: 0 to 0.5", "Q4: > 0.5"), 
+                       include.lowest = TRUE))
+
+# Plot the world map
+ggplot(data = world_data) +
+  geom_sf(aes(fill = val_bin), color = "gray", na.fill = "gray") +
+  scale_fill_manual(values = c("Q1: <= -0.5" = "yellow", "Q2: -0.5 to 0" = "orange", "Q3: 0 to 0.5" = "red", "Q4: > 0.5" = "darkred"), na.translate = FALSE) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1.5),
+    plot.margin = margin(t = 50, r = 20, b = 20, l = 20)  # Increase top margin to give space for the title
+  ) +
+  theme(panel.grid.major = element_blank(), # Remove major grid lines
+        panel.grid.minor = element_blank()) + # Remove minor grid lines
+  labs(title = "Annualised rate of change in the death rate of Ovarian cancer attributable to High BMI, 1990–2021",
+       fill = "Death Rate of Change") +
+  theme(legend.position = "bottom")
+```
+
+```{r}
+#map_Cervical_unsafesex
+Cervical_unsafesex <- read.csv("/Users/cristochow/Desktop/daily_work//task_15/risk_factor_Death/Cervical_unsafesex/Cervicalcancer_unsafe.csv")
+
+
+# Preprocess data to get the relevant columns
+data_filtered <- Cervical_unsafesex %>%
+  filter(measure == "Deaths" & cause == "Cervical cancer" & rei == "Unsafe sex" & metric == "Rate") %>%
+  select(location, val)
+
+# Load world map data
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Merge the world map data with our data
+world_data <- world %>%
+  left_join(data_filtered, by = c("name" = "location"))
+
+# Create bins for the rate of change with specified ranges
+world_data <- world_data %>%
+  mutate(val_bin = cut(val, 
+                       breaks = c(-Inf, -0.5, 0, 0.5, Inf), 
+                       labels = c("Q1: <= -0.5", "Q2: -0.5 to 0", "Q3: 0 to 0.5", "Q4: > 0.5"), 
+                       include.lowest = TRUE))
+
+# Plot the world map
+ggplot(data = world_data) +
+  geom_sf(aes(fill = val_bin), color = "gray", na.fill = "gray") +
+  scale_fill_manual(values = c("Q1: <= -0.5" = "yellow", "Q2: -0.5 to 0" = "orange", "Q3: 0 to 0.5" = "red", "Q4: > 0.5" = "darkred"), na.translate = FALSE) + theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1.5),
+    plot.margin = margin(t = 50, r = 20, b = 20, l = 20)  # Increase top margin to give space for the title
+  ) +
+  theme(panel.grid.major = element_blank(), # Remove major grid lines
+        panel.grid.minor = element_blank()) + # Remove minor grid lines
+  labs(title = "Annualised rate of change in the death rate of Cervical cancer attributable to Unsafe sex, 1990–2021",
+       fill = "Death Rate of Change") +
+  theme(legend.position = "bottom")
+```
+
+
+```{r}
+#map_Cervical_tobacoo
+
+Cervical_tobacoo <- read.csv("/Users/cristochow/Desktop/daily_work//task_15/risk_factor_Death/Cervical_tobacoo/Cervical_tobacoo.csv")
+
+
+# Preprocess data to get the relevant columns
+data_filtered <- Cervical_tobacoo %>%
+  filter(measure == "Deaths" & cause == "Cervical cancer" & rei == "Tobacco" & metric == "Rate") %>%
+  select(location, val)
+
+# Load world map data
+world <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Merge the world map data with our data
+world_data <- world %>%
+  left_join(data_filtered, by = c("name" = "location"))
+
+# Create bins for the rate of change with specified ranges
+world_data <- world_data %>%
+  mutate(val_bin = cut(val, 
+                       breaks = c(-Inf, -0.5, 0, 0.5, Inf), 
+                       labels = c("Q1: <= -0.5", "Q2: -0.5 to 0", "Q3: 0 to 0.5", "Q4: > 0.5"), 
+                       include.lowest = TRUE))
+
+# Plot the world map
+ggplot(data = world_data) +
+  geom_sf(aes(fill = val_bin), color = "gray", na.fill = "gray") +
+  scale_fill_manual(values = c("Q1: <= -0.5" = "yellow", "Q2: -0.5 to 0" = "orange", "Q3: 0 to 0.5" = "red", "Q4: > 0.5" = "darkred"), na.translate = FALSE) +theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5, vjust = 1.5),
+    plot.margin = margin(t = 50, r = 20, b = 20, l = 20)  # Increase top margin to give space for the title
+  ) +
+  theme(panel.grid.major = element_blank(), # Remove major grid lines
+        panel.grid.minor = element_blank()) + # Remove minor grid lines
+  labs(title = "Annualised rate of change in the death rate of Cervical cancer attributable to Tobacoo, 1990–2021",
+       fill = "Death Rate of Change") +
+  theme(legend.position = "bottom")
+```
+
+
+
+```{r}
+#mHeatmap_propotion_breast_risk
+library(reshape2)
+library(plotly)
+breast_heatmap <- read.csv("/Users/cristochow/Desktop/daily_work//task_15/Heatmap/breast_heatmap.csv")
+
+breast_heatmap$Region <- as.character(breast_heatmap$location)
+breast_heatmap$Risk <- as.character(breast_heatmap$rei)
+breast_heatmap$Rank <- as.character(breast_heatmap$rank)
+
+breast_heatmap$fill<-breast_heatmap$rank
+breast_heatmap$fill[breast_heatmap$rank==1] <- "1"
+breast_heatmap$fill[breast_heatmap$rank==2] <- "2"
+breast_heatmap$fill[breast_heatmap$rank==3] <- "3"
+breast_heatmap$fill[breast_heatmap$rank==4] <- "4"
+breast_heatmap$fill[breast_heatmap$rank==5] <- "5"
+breast_heatmap$fill[breast_heatmap$rank==6] <- "6"
+
+ggplot(breast_heatmap, aes(x = Region, y = Risk)) +
+  geom_tile(aes(fill = fill), colour = "white", size = 0.3) +
+  scale_fill_brewer(palette = "RdBu") +
+  geom_text(aes(label = Rank), family = "mono", colour = "white") +
+  scale_x_discrete(limits = c("Global", "High SDI", "High-middle SDI", "Middle SDI", "Low-middle SDI", "Low SDI",
+                              "Central Asia", "East Asia", "South Asia", "High-income Asia Pacific", "Southeast Asia",
+                              "Australasia", "Oceania", "Eastern Europe", "Central Europe", "Western Europe",
+                              "High-income North America", "Caribbean", "Andean Latin America", "Central Latin America",
+                              "Tropical Latin America", "Southern Latin America", "North Africa and Middle East", 
+                              "Central Sub-Saharan Africa", "Southern Sub-Saharan Africa", "Western Sub-Saharan Africa", 
+                              "Eastern Sub-Saharan Africa")) +
+  scale_y_discrete(limits = rev(c("Diet high in red meat", "High body-mass index", "Alcohol use", "Tobacco",
+                                  "High fasting plasma glucose", "Low physical activity"))) +
+  guides(fill = FALSE) +
+    labs(title = "Ranked contribution of risk factors to the death rate of breast cancer by region, 2021, for child-bearing female", 
+       x = NULL, 
+       y = NULL) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  
+
+```
+
+
+```{r}
+
+```
+
+```{r}
+
+```
